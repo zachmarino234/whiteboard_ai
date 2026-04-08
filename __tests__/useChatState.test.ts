@@ -9,6 +9,31 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
+/** Helper to create an SSE ReadableStream from an array of events */
+function createSSEStream(events: Array<{ type: string; text?: string; error?: string }>) {
+  const encoder = new TextEncoder();
+  const chunks = events.map(
+    (e) => encoder.encode(`data: ${JSON.stringify(e)}\n\n`)
+  );
+  let index = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(chunks[index++]);
+      } else {
+        controller.close();
+      }
+    },
+  });
+}
+
+function mockSSEResponse(events: Array<{ type: string; text?: string; error?: string }>) {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    body: createSSEStream(events),
+  });
+}
+
 describe('useChatState', () => {
   it('starts with empty state', () => {
     const { result } = renderHook(() => useChatState());
@@ -17,14 +42,12 @@ describe('useChatState', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('adds user message and assistant response on send', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        message: 'Think about it!',
-        actions: [],
-      }),
-    });
+  it('adds user message and streams assistant response', async () => {
+    mockSSEResponse([
+      { type: 'delta', text: '{"message": "Think ' },
+      { type: 'delta', text: 'about it!", "actions": []}' },
+      { type: 'done' },
+    ]);
 
     const { result } = renderHook(() => useChatState());
 
@@ -40,12 +63,23 @@ describe('useChatState', () => {
   });
 
   it('sets isLoading during API call', async () => {
-    let resolvePromise!: (value: unknown) => void;
-    mockFetch.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolvePromise = resolve;
-      })
-    );
+    let resolveStream!: () => void;
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: 'delta', text: '{"message":"ok","actions":[]}' })}\n\n`)
+        );
+        resolveStream = () => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+          );
+          controller.close();
+        };
+      },
+    });
+
+    mockFetch.mockResolvedValueOnce({ ok: true, body: stream });
 
     const { result } = renderHook(() => useChatState());
 
@@ -54,14 +88,10 @@ describe('useChatState', () => {
       sendPromise = result.current.sendMessage('test');
     });
 
-    // Should be loading after send starts
     expect(result.current.isLoading).toBe(true);
 
     await act(async () => {
-      resolvePromise({
-        ok: true,
-        json: async () => ({ message: 'response', actions: [] }),
-      });
+      resolveStream();
       await sendPromise;
     });
 
@@ -82,7 +112,6 @@ describe('useChatState', () => {
     });
 
     expect(result.current.error).toBe('Server error');
-    // User message should still be added
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe('user');
   });
@@ -99,14 +128,26 @@ describe('useChatState', () => {
     expect(result.current.error).toBe('Network error');
   });
 
-  it('returns AI actions from sendMessage', async () => {
-    const actions = [
-      { type: 'place_latex', latex: 'x^2', position: { x: 0, y: 0 } },
-    ];
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ message: 'Here', actions }),
+  it('sets error on stream error event', async () => {
+    mockSSEResponse([
+      { type: 'delta', text: 'partial' },
+      { type: 'error', error: 'Rate limited' },
+    ]);
+
+    const { result } = renderHook(() => useChatState());
+
+    await act(async () => {
+      await result.current.sendMessage('test');
     });
+
+    expect(result.current.error).toBe('Rate limited');
+  });
+
+  it('returns AI actions from sendMessage', async () => {
+    mockSSEResponse([
+      { type: 'delta', text: '{"message":"Here","actions":[{"type":"place_latex","latex":"x^2","position":{"x":0,"y":0}}]}' },
+      { type: 'done' },
+    ]);
 
     const { result } = renderHook(() => useChatState());
 
@@ -115,14 +156,16 @@ describe('useChatState', () => {
       returned = await result.current.sendMessage('test');
     });
 
-    expect(returned).toEqual(actions);
+    expect(returned).toEqual([
+      { type: 'place_latex', latex: 'x^2', position: { x: 0, y: 0 } },
+    ]);
   });
 
   it('sends lasso context in the request body', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ message: 'ok', actions: [] }),
-    });
+    mockSSEResponse([
+      { type: 'delta', text: '{"message":"ok","actions":[]}' },
+      { type: 'done' },
+    ]);
 
     const selection = {
       imageDataUrl: 'data:image/png;base64,abc',
@@ -142,10 +185,10 @@ describe('useChatState', () => {
   });
 
   it('attaches lasso context to user message', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ message: 'ok', actions: [] }),
-    });
+    mockSSEResponse([
+      { type: 'delta', text: '{"message":"ok","actions":[]}' },
+      { type: 'done' },
+    ]);
 
     const selection = {
       imageDataUrl: 'data:image/png;base64,abc',
@@ -166,10 +209,10 @@ describe('useChatState', () => {
   });
 
   it('clears messages', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ message: 'ok', actions: [] }),
-    });
+    mockSSEResponse([
+      { type: 'delta', text: '{"message":"ok","actions":[]}' },
+      { type: 'done' },
+    ]);
 
     const { result } = renderHook(() => useChatState());
 

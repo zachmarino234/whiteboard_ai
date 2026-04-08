@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useEffect, useCallback } from 'react';
 import {
   BaseBoxShapeUtil,
   Rectangle2d,
@@ -8,8 +9,8 @@ import {
   HTMLContainer,
   resizeBox,
 } from '@tldraw/editor';
+import type { Editor, RecordProps } from '@tldraw/editor';
 import { T } from '@tldraw/validate';
-import type { RecordProps } from '@tldraw/editor';
 import katex from 'katex';
 
 // --- Shape type definition ---
@@ -114,8 +115,8 @@ export class LatexShapeUtil extends BaseBoxShapeUtil<LatexShape> {
           latex={shape.props.latex}
           color={shape.props.color}
           fontSize={shape.props.fontSize}
-          w={shape.props.w}
-          h={shape.props.h}
+          shapeId={shape.id}
+          editor={this.editor}
         />
       </HTMLContainer>
     );
@@ -139,15 +140,51 @@ function LatexDisplay({
   latex,
   color,
   fontSize,
-  w,
-  h,
+  shapeId,
+  editor,
 }: {
   latex: string;
   color: string;
   fontSize: number;
-  w: number;
-  h: number;
+  shapeId: LatexShape['id'];
+  editor: Editor;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastLatex = useRef(latex);
+  const lastFontSize = useRef(fontSize);
+
+  const measureAndResize = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    // Measure the actual rendered content size
+    const contentW = el.scrollWidth;
+    const contentH = el.scrollHeight;
+    if (contentW <= 0 || contentH <= 0) return;
+
+    const padding = 16;
+    const newW = contentW + padding;
+    const newH = contentH + padding;
+
+    const shape = editor.getShape(shapeId);
+    if (!shape) return;
+    const props = (shape as LatexShape).props;
+    // Only update if size differs meaningfully to avoid loops
+    if (Math.abs(props.w - newW) > 3 || Math.abs(props.h - newH) > 3) {
+      editor.updateShape({
+        id: shapeId,
+        type: 'latex',
+        props: { w: newW, h: newH },
+      });
+    }
+  }, [editor, shapeId]);
+
+  useEffect(() => {
+    // Measure after render when latex or fontSize changes
+    lastLatex.current = latex;
+    lastFontSize.current = fontSize;
+    requestAnimationFrame(measureAndResize);
+  }, [latex, fontSize, measureAndResize]);
+
   let html: string;
   let isError = false;
 
@@ -163,16 +200,15 @@ function LatexDisplay({
 
   return (
     <div
+      ref={containerRef}
       style={{
-        width: w,
-        height: h,
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         color,
         fontSize,
         pointerEvents: 'all',
-        overflow: 'hidden',
+        whiteSpace: 'nowrap',
       }}
     >
       {isError ? (

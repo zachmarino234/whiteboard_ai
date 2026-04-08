@@ -71,4 +71,12 @@ describe('WhiteboardCanvas', () => {
     const canvas = screen.getByTestId('tldraw-canvas');
     expect(canvas.getAttribute('data-has-children')).toBe('false');
   });
+
+  it('calls onEditorReady with the editor on mount', () => {
+    const onEditorReady = vi.fn();
+    render(<WhiteboardCanvas onEditorReady={onEditorReady} />);
+    expect(onEditorReady).toHaveBeenCalledWith(
+      expect.objectContaining({ updateInstanceState: expect.any(Function) })
+    );
+  });
 });

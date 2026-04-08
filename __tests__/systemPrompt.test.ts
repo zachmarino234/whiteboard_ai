@@ -9,7 +9,7 @@ describe('TUTOR_SYSTEM_PROMPT', () => {
 
   it('instructs Socratic method', () => {
     expect(TUTOR_SYSTEM_PROMPT).toContain('Socratic');
-    expect(TUTOR_SYSTEM_PROMPT).toContain('NEVER solve problems');
+    expect(TUTOR_SYSTEM_PROMPT).toContain('guiding question');
   });
 
   it('specifies JSON response format', () => {

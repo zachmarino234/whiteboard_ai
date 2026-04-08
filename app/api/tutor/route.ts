@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { TUTOR_SYSTEM_PROMPT } from '@/lib/systemPrompt';
-import { parseAIResponse } from '@/lib/parseAIResponse';
 
 const anthropic = new Anthropic();
 
@@ -9,7 +8,7 @@ interface TutorRequestBody {
     role: 'user' | 'assistant';
     content: string;
   }>;
-  lassoImage?: string; // base64-encoded PNG (no data URL prefix)
+  lassoImage?: string; // base64-encoded PNG (data URL or raw base64)
   boundingBox?: { x: number; y: number; w: number; h: number };
 }
 
@@ -43,7 +42,6 @@ export async function POST(request: Request) {
     const isLast = i === body.messages.length - 1;
 
     if (msg.role === 'user' && isLast && body.lassoImage) {
-      // Attach the lasso image to the final user message
       const content: Anthropic.ContentBlockParam[] = [
         {
           type: 'image',
@@ -62,11 +60,7 @@ export async function POST(request: Request) {
         });
       }
 
-      content.push({
-        type: 'text',
-        text: msg.content,
-      });
-
+      content.push({ type: 'text', text: msg.content });
       claudeMessages.push({ role: 'user', content });
     } else {
       claudeMessages.push({ role: msg.role, content: msg.content });
@@ -74,22 +68,50 @@ export async function POST(request: Request) {
   }
 
   try {
-    const response = await anthropic.messages.create({
+    const stream = anthropic.messages.stream({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
       system: TUTOR_SYSTEM_PROMPT,
       messages: claudeMessages,
     });
 
-    // Extract text from the response
-    const rawText = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
+    const encoder = new TextEncoder();
 
-    const parsed = parseAIResponse(rawText);
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === 'content_block_delta' &&
+              event.delta.type === 'text_delta'
+            ) {
+              // Send each text chunk as an SSE data event
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'delta', text: event.delta.text })}\n\n`)
+              );
+            }
+          }
+          // Send a done event
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'Unknown API error';
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`)
+          );
+          controller.close();
+        }
+      },
+    });
 
-    return Response.json(parsed);
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
   } catch (err) {
     console.error('Anthropic API error:', err);
     const message =

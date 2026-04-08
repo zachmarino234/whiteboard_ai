@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { SelectionContext } from '@/lib/captureSelection';
 import type { ChatMessage as ChatMessageType, AIAction } from '@/lib/types';
 import SelectionPreview from './SelectionPreview';
@@ -18,6 +18,7 @@ interface ChatPanelProps {
     selection?: SelectionContext | null
   ) => Promise<AIAction[]>;
   onClearMessages: () => void;
+  onClearAnnotations?: () => void;
 }
 
 export default function ChatPanel({
@@ -28,15 +29,64 @@ export default function ChatPanel({
   error,
   onSendMessage,
   onClearMessages,
+  onClearAnnotations,
 }: ChatPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [input, setInput] = useState('');
+  const [size, setSize] = useState({ w: 320, h: 384 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isResizing = useRef(false);
+  const resizeDir = useRef<'top' | 'left' | 'corner'>('corner');
+  const startPos = useRef({ x: 0, y: 0 });
+  const startSize = useRef({ w: 320, h: 384 });
+
+  const MIN_W = 280;
+  const MAX_W = 600;
+  const MIN_H = 250;
+  const MAX_H = 800;
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  const handleResizeMouseDown = useCallback(
+    (dir: 'top' | 'left' | 'corner') => (e: React.MouseEvent) => {
+      e.preventDefault();
+      isResizing.current = true;
+      resizeDir.current = dir;
+      startPos.current = { x: e.clientX, y: e.clientY };
+      startSize.current = { ...size };
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        if (!isResizing.current) return;
+        const dx = startPos.current.x - ev.clientX;
+        const dy = startPos.current.y - ev.clientY;
+
+        setSize((prev) => {
+          const newW =
+            resizeDir.current === 'top'
+              ? prev.w
+              : Math.min(MAX_W, Math.max(MIN_W, startSize.current.w + dx));
+          const newH =
+            resizeDir.current === 'left'
+              ? prev.h
+              : Math.min(MAX_H, Math.max(MIN_H, startSize.current.h + dy));
+          return { w: newW, h: newH };
+        });
+      };
+
+      const handleMouseUp = () => {
+        isResizing.current = false;
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    },
+    [size]
+  );
 
   if (!isOpen) {
     return (
@@ -68,18 +118,50 @@ export default function ChatPanel({
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex h-96 w-80 flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl">
+    <div
+      className="fixed bottom-4 right-4 z-50 flex flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+      style={{ width: size.w, height: size.h }}
+    >
+      {/* Resize handles */}
+      {/* Top edge */}
+      <div
+        className="absolute -top-1 left-2 right-2 h-2 cursor-n-resize"
+        onMouseDown={handleResizeMouseDown('top')}
+        data-testid="resize-top"
+      />
+      {/* Left edge */}
+      <div
+        className="absolute -left-1 top-2 bottom-2 w-2 cursor-w-resize"
+        onMouseDown={handleResizeMouseDown('left')}
+        data-testid="resize-left"
+      />
+      {/* Top-left corner */}
+      <div
+        className="absolute -top-1 -left-1 h-3 w-3 cursor-nw-resize"
+        onMouseDown={handleResizeMouseDown('corner')}
+        data-testid="resize-corner"
+      />
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
         <span className="text-sm font-medium text-white">AI Tutor</span>
         <div className="flex items-center gap-2">
+          {onClearAnnotations && (
+            <button
+              onClick={onClearAnnotations}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+              title="Clear AI annotations from canvas"
+              data-testid="clear-annotations"
+            >
+              Clear Canvas
+            </button>
+          )}
           {messages.length > 0 && (
             <button
               onClick={onClearMessages}
               className="text-xs text-zinc-500 hover:text-zinc-300"
               title="Clear chat"
             >
-              Clear
+              Clear Chat
             </button>
           )}
           <button

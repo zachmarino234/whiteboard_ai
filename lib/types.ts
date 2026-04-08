@@ -18,6 +18,7 @@ export interface ChatMessage {
     boundingBox: { x: number; y: number; w: number; h: number };
   };
   timestamp: number;
+  animate?: boolean;
 }
 
 export type AIAction =

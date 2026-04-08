@@ -1,6 +1,7 @@
 'use client';
 
-import { Tldraw, type TLUiOverrides } from 'tldraw';
+import { Tldraw, DefaultStylePanel, type TLUiOverrides, type TLComponents } from 'tldraw';
+import type { Editor } from '@tldraw/editor';
 import 'tldraw/tldraw.css';
 import 'katex/dist/katex.min.css';
 import { LatexShapeUtil } from './shapes/LatexShape';
@@ -26,12 +27,26 @@ const uiOverrides: TLUiOverrides = {
   },
 };
 
+function RepositionedStylePanel() {
+  return (
+    <div className="absolute top-14 left-2 z-40">
+      <DefaultStylePanel />
+    </div>
+  );
+}
+
+const components: TLComponents = {
+  StylePanel: RepositionedStylePanel,
+};
+
 interface WhiteboardCanvasProps {
   onSelectionCapture?: (context: SelectionContext | null) => void;
+  onEditorReady?: (editor: Editor) => void;
 }
 
 export default function WhiteboardCanvas({
   onSelectionCapture,
+  onEditorReady,
 }: WhiteboardCanvasProps) {
   return (
     <div className="absolute inset-0">
@@ -40,8 +55,10 @@ export default function WhiteboardCanvas({
         shapeUtils={customShapeUtils}
         tools={customTools}
         overrides={uiOverrides}
+        components={components}
         onMount={(editor) => {
           editor.updateInstanceState({ isGridMode: true });
+          onEditorReady?.(editor);
         }}
       >
         {onSelectionCapture && (

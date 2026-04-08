@@ -164,17 +164,17 @@ describe('ChatPanel', () => {
     expect(input.value).toBe('');
   });
 
-  it('shows clear button when messages exist', () => {
+  it('shows Clear Chat button when messages exist', () => {
     render(<ChatPanel {...defaultProps} messages={sampleMessages} />);
-    expect(screen.getByText('Clear')).toBeInTheDocument();
+    expect(screen.getByText('Clear Chat')).toBeInTheDocument();
   });
 
-  it('does not show clear button when no messages', () => {
+  it('does not show Clear Chat button when no messages', () => {
     render(<ChatPanel {...defaultProps} />);
-    expect(screen.queryByText('Clear')).not.toBeInTheDocument();
+    expect(screen.queryByText('Clear Chat')).not.toBeInTheDocument();
   });
 
-  it('calls onClearMessages when clear is clicked', () => {
+  it('calls onClearMessages when Clear Chat is clicked', () => {
     const onClear = vi.fn();
     render(
       <ChatPanel
@@ -183,7 +183,29 @@ describe('ChatPanel', () => {
         onClearMessages={onClear}
       />
     );
-    fireEvent.click(screen.getByText('Clear'));
+    fireEvent.click(screen.getByText('Clear Chat'));
     expect(onClear).toHaveBeenCalledOnce();
+  });
+
+  it('shows Clear Canvas button when onClearAnnotations is provided', () => {
+    const onClearAnnotations = vi.fn();
+    render(
+      <ChatPanel {...defaultProps} onClearAnnotations={onClearAnnotations} />
+    );
+    expect(screen.getByTestId('clear-annotations')).toBeInTheDocument();
+  });
+
+  it('does not show Clear Canvas button without onClearAnnotations', () => {
+    render(<ChatPanel {...defaultProps} />);
+    expect(screen.queryByTestId('clear-annotations')).not.toBeInTheDocument();
+  });
+
+  it('calls onClearAnnotations when Clear Canvas is clicked', () => {
+    const onClearAnnotations = vi.fn();
+    render(
+      <ChatPanel {...defaultProps} onClearAnnotations={onClearAnnotations} />
+    );
+    fireEvent.click(screen.getByTestId('clear-annotations'));
+    expect(onClearAnnotations).toHaveBeenCalledOnce();
   });
 });

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import type { ChatMessage, AIAction, AIResponse } from './types';
+import type { ChatMessage, AIAction } from './types';
 import type { SelectionContext } from './captureSelection';
+import { parseAIResponse } from './parseAIResponse';
 
 interface UseChatStateReturn {
   messages: ChatMessage[];
@@ -44,12 +45,13 @@ export function useChatState(): UseChatStateReturn {
         timestamp: Date.now(),
       };
 
+      const assistantId = nextId();
+
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
       setError(null);
 
       try {
-        // Build the messages array for the API (all history + new message)
         const apiMessages = [...messages, userMessage].map((m) => ({
           role: m.role,
           content: m.content,
@@ -70,22 +72,58 @@ export function useChatState(): UseChatStateReturn {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
-          throw new Error(
-            errData?.error || `API error: ${res.status}`
-          );
+          throw new Error(errData?.error || `API error: ${res.status}`);
         }
 
-        const data: AIResponse = await res.json();
+        // Read the SSE stream silently — only show thinking dots during this phase
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('No response stream');
 
-        const assistantMessage: ChatMessage = {
-          id: nextId(),
-          role: 'assistant',
-          content: data.message,
-          timestamp: Date.now(),
-        };
+        const decoder = new TextDecoder();
+        let fullText = '';
 
-        setMessages((prev) => [...prev, assistantMessage]);
-        return data.actions;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const json = line.slice(6);
+
+            let event: { type: string; text?: string; error?: string };
+            try {
+              event = JSON.parse(json);
+            } catch {
+              continue;
+            }
+
+            if (event.type === 'delta' && event.text) {
+              fullText += event.text;
+            } else if (event.type === 'error') {
+              throw new Error(event.error || 'Stream error');
+            }
+          }
+        }
+
+        // Parse the complete response for actions
+        const parsed = parseAIResponse(fullText);
+
+        // Add the assistant message with typing animation
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: parsed.message,
+            timestamp: Date.now(),
+            animate: true,
+          },
+        ]);
+
+        return parsed.actions;
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Something went wrong';
